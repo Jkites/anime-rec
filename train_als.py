@@ -5,7 +5,7 @@ import pickle
 import numpy as np
 import pandas as pd
 from scipy.sparse import coo_matrix, save_npz, load_npz
-from implicit.als import AlternatingLeastSquares
+from implicit.als import AlternatingLeastSquares #uninstall implicit
 from tqdm import tqdm
 #import math
 from sklearn.metrics import root_mean_squared_error
@@ -106,16 +106,6 @@ def preprocess(csv_path, k_folds, final_test_ratio, cache_dir):
 
     print("Preprocessing complete.")
 
-# evaluate model
-# def evaluate(model, test_matrix):
-#     preds = model.user_factors @ model.item_factors.T
-#     # Clip predictions to rating range
-#     preds = np.clip(preds, 1, 10)
-#     true_rows, true_cols = test_matrix.nonzero()
-#     errors = []
-#     for r, c in zip(true_rows, true_cols):
-#         errors.append((preds[c, r] - test_matrix[r, c]) ** 2)
-#     return math.sqrt(np.mean(errors))
 def evaluate(model, test_matrix):
     users, items = test_matrix.nonzero()
     preds = []
@@ -138,8 +128,8 @@ def main():
     preprocess(RAW_CSV, N_FOLDS, TEST_RATIO, CACHE_DIR)
 
     # load mappings
-    user_map = pickle.load(open(os.path.join(CACHE_DIR, "user_map.pkl"), "rb"))
-    anime_map = pickle.load(open(os.path.join(CACHE_DIR, "anime_map.pkl"), "rb"))
+    # user_map = pickle.load(open(os.path.join(CACHE_DIR, "user_map.pkl"), "rb"))
+    # anime_map = pickle.load(open(os.path.join(CACHE_DIR, "anime_map.pkl"), "rb"))
 
     # cross-validation
     rmses = []
