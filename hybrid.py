@@ -5,10 +5,13 @@ import joblib
 import pickle
 import numpy as np
 from surprise import Dataset, Reader, SVD, accuracy
-from surprise.model_selection import train_test_split
+from sklearn.model_selection import train_test_split
+# from surprise.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import random
+from collections import defaultdict
+from scipy.sparse import save_npz, load_npz
 
 RATING_CSV = "data/ratings.csv"
 ANIME_CSV = "data/animes.csv"
@@ -18,11 +21,12 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # cf_model, content_sim, anime_index, idx_to_animeID
 CF_MODEL_FILE = os.path.join(DATA_DIR, "cf_model.pkl")
 # TFIDF_FILE = os.path.join(DATA_DIR, "tfidf_vectorizer.pkl")
-SIM_MATRIX_FILE = os.path.join(DATA_DIR, "content_sim.npy")
+SIM_MATRIX_FILE = os.path.join(DATA_DIR, "content_sim.npz")
 A2IDX_FILE = os.path.join(DATA_DIR, "anime_index.pkl")
 IDX2A_FILE = os.path.join(DATA_DIR, "idx_to_animeID.pkl")
+BEST_ALPHA_FILE = os.path.join(DATA_DIR, "best_alpha.txt")
 
-LOAD_ONLY = False  # set True to skip retraining if cache exists
+LOAD_ONLY = True  # set True to skip retraining if cache exists
 
 # cap ratings for now
 MAX_RATINGS = 2_000_000
@@ -40,9 +44,16 @@ def load():
     # split into train test
     reader = Reader(rating_scale=(0.1, 10.0))
     print("loading dataset from df (capped)")
-    data = Dataset.load_from_df(ratings[['userID', 'animeID', 'rating']], reader)
-    trainset, testset = train_test_split(data, test_size=0.2, random_state=1)
-    return ratings, anime_meta, trainset, testset
+    # data = Dataset.load_from_df(ratings[['userID', 'animeID', 'rating']], reader)
+    full_trainset, testset = train_test_split(ratings, test_size=0.2, random_state=1)
+    trainset, valset = train_test_split(full_trainset, test_size=0.1, random_state=1)
+
+    # convert to surprise dataset
+    trainset = Dataset.load_from_df(trainset[['userID', 'animeID', 'rating']], reader).build_full_trainset()
+    valset = Dataset.load_from_df(valset[['userID', 'animeID', 'rating']], reader).build_full_trainset().build_testset()
+    testset = Dataset.load_from_df(testset[['userID', 'animeID', 'rating']], reader).build_full_trainset().build_testset()
+    
+    return ratings, anime_meta, trainset, valset, testset
 
 # train SVD model
 def trainSVD(trainset, testset):
@@ -79,7 +90,7 @@ def trainContentBased(anime_meta):
 
     # compute similarity matrix (item-item)
     print("computing ismilarity matrix...")
-    content_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+    content_sim = cosine_similarity(tfidf_matrix, tfidf_matrix, dense_output=False)
 
     # map animeID to index in similarity matrix
     print("mapping ids to index")
@@ -88,23 +99,62 @@ def trainContentBased(anime_meta):
     return content_sim, anime_index, idx_to_animeID
 
 # # average similarity of candidate to items the user has watched
-# def content_based_score(user_watched_ids, candidate_id, content_sim, anime_index):
-#     if candidate_id not in anime_index:
+# def content_based_score(user_watched_ids, userID, content_sim, anime_index):
+#     if userID not in anime_index:
 #         return 0
-#     cand_idx = anime_index[candidate_id]
+#     cand_idx = anime_index[userID]
 #     sims = []
 #     for wid in user_watched_ids:
 #         if wid in anime_index:
 #             sims.append(content_sim[cand_idx, anime_index[wid]])
 #     return np.mean(sims) if sims else 0
+def cb_predict(userID, user_watched, content_sim, anime_index):
+    if userID not in anime_index:
+        return None  # can't compute CB for this anime
+    
+    cand_idx = anime_index[userID]
+    
+    # filter only rated items that exist in similarity matrix
+    rated_idxs = []
+    ratings = []
+    for aid, r in user_watched:
+        if aid in anime_index:
+            rated_idxs.append(anime_index[aid])
+            ratings.append(r)
+    
+    if not rated_idxs:
+        return None  # no overlap
+    
+    sims = content_sim[cand_idx, rated_idxs].toarray().ravel()  # similarity vector to user's rated items
+    ratings = np.array(ratings, dtype=np.float32)
 
-def hybrid_rmse(testset, anime_index, content_sim, cf_items_seen, cf_model, alpha=0.7):
+    numerator = np.dot(sims, ratings)
+    denominator = np.sum(sims)
+    
+    if denominator <= 0:
+        return None
+    
+    pred = numerator / denominator
+    # clip to valid range
+    return float(np.clip(pred, 0.1, 10.0))
+
+def precompute_cb_scores(testset, anime_index, content_sim):
+    print("precomputing cb scores...")
+    cb_scores = {}
+    for _, iid, _ in testset:
+        if iid in anime_index and iid not in cb_scores:
+            idx = anime_index[iid]
+            row = content_sim[idx].toarray().ravel() # only sparse works
+            cb_scores[iid] = row.mean()
+    return cb_scores
+
+def hybrid_rmse(testset, anime_index, cf_items_seen, cf_model, cb_scores, alpha=0.7):
     y_true, y_pred = [], []
     for uid, iid, true_r in testset:
         cb_score = 0
         if iid in anime_index:
-            idx = anime_index[iid]
-            cb_score = np.mean(content_sim[idx])  # average similarity score
+            # idx = anime_index[iid]
+            cb_score = cb_scores.get(iid, 0)  # average similarity score
 
         if iid in cf_items_seen:
             cf_score = cf_model.predict(uid, iid).est
@@ -115,9 +165,41 @@ def hybrid_rmse(testset, anime_index, content_sim, cf_items_seen, cf_model, alph
         y_true.append(true_r)
         y_pred.append(pred)
 
-    return np.sqrt(np.mean((np.array(y_true) - np.array(y_pred))**2)) #2.8163 :(
+    return np.sqrt(np.mean((np.array(y_true) - np.array(y_pred))**2)) #2.8163 :( 2.8236...
 
-def hybrid_recommend(userID, ratings, anime_meta, cf_model, content_sim, anime_index, idx_to_animeID, top_n=10, alpha=0.7):
+def find_best_alpha(val_data, cf_model, trainset, content_sim, anime_index):
+    alphas = np.linspace(0, 1, 21)
+    best_alpha, best_rmse = None, float("inf")
+    
+    cf_preds = []
+    cb_preds = []
+    y_true = []
+    user_history_map = defaultdict(list)
+    for uid, iid, r in trainset.build_testset():
+        user_history_map[uid].append((iid, r))
+    for uid, iid, r in val_data:
+        # user_watched = ratings[ratings['userID'] == uid]['animeID'].tolist()
+        y_true.append(r)
+        cf_pred = cf_model.predict(uid, iid).est
+        cb_pred = cb_predict(iid, user_history_map[uid], content_sim, anime_index)
+        cf_preds.append(cf_pred)
+        cb_preds.append(cb_pred if cb_pred is not None else cf_pred)
+    
+    cf_preds = np.array(cf_preds, dtype=np.float32)
+    cb_preds = np.array(cb_preds, dtype=np.float32)
+    y_true = np.array(y_true, dtype=np.float32)
+    
+    for a in alphas:
+        preds = a * cf_preds + (1 - a) * cb_preds
+        rmse = np.sqrt(np.mean((y_true - preds) ** 2))
+        if rmse < best_rmse:
+            best_rmse = rmse
+            best_alpha = a
+    
+    return best_alpha, best_rmse # 1.6441
+
+
+def hybrid_recommend(userID, ratings, anime_meta, cf_model, content_sim, anime_index, cb_scores, top_n=10, alpha=0.7): #removed indx_to_animeID param unused
     # blend CF and CB recommendations with alpha
     # get all anime IDs
     # all_animeIDs = anime_meta['animeID'].tolist()
@@ -129,8 +211,8 @@ def hybrid_recommend(userID, ratings, anime_meta, cf_model, content_sim, anime_i
 
     # sum similarities for watched anime
     print("summing similarity scores")
-    sim_vector = np.sum(content_sim[[anime_index[aid] for aid in user_watched if aid in anime_index]], axis=0)
-    sim_scores = {idx_to_animeID[i]: sim_vector[i] for i in range(len(sim_vector))}
+    # sim_vector = np.sum(content_sim[[anime_index[aid] for aid in user_watched if aid in anime_index]], axis=0)
+    # sim_scores = {idx_to_animeID[i]: sim_vector[i] for i in range(len(sim_vector))}
 
     # unique seen anime IDs by CF
     cf_items_seen = set(ratings['animeID'].unique())
@@ -140,16 +222,17 @@ def hybrid_recommend(userID, ratings, anime_meta, cf_model, content_sim, anime_i
     for animeID in anime_meta['animeID']:
         if animeID in user_watched:
             continue
-        cb_score = sim_scores.get(animeID, 0)
+        # cb_score = sim_scores.get(animeID, 0)
+        cb_score = cb_predict(userID, user_watched, content_sim, anime_index)
         if animeID in cf_items_seen: # blend
             cf_score = cf_model.predict(userID, animeID).est
-            final_scores[animeID] = alpha * cf_score + (1 - alpha) * cb_score
-        else: # just cb
-            final_scores[animeID] = cb_score
+            final_scores[animeID] = alpha * cf_score + (1 - alpha) * (cb_score if cb_score is not None else cf_score)
+        # else: # just cb
+        #     final_scores[animeID] = cb_score
 
     ranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
 
-    hybrid_rmse_val = hybrid_rmse(testset, anime_index, content_sim, cf_items_seen, cf_model, alpha=0.7)
+    hybrid_rmse_val = hybrid_rmse(testset, anime_index, cf_items_seen, cf_model, cb_scores, alpha)
     print(f"Hybrid RMSE: {hybrid_rmse_val:.4f}")
 
     return ranked[:top_n]
@@ -181,34 +264,47 @@ def hybrid_recommend(userID, ratings, anime_meta, cf_model, content_sim, anime_i
     # return scores[:top_n]
     
 if __name__ == "__main__":
-    if LOAD_ONLY and all(os.path.exists(f) for f in [CF_MODEL_FILE, SIM_MATRIX_FILE, A2IDX_FILE, IDX2A_FILE]):
+    if LOAD_ONLY and all(os.path.exists(f) for f in [CF_MODEL_FILE, SIM_MATRIX_FILE, A2IDX_FILE, IDX2A_FILE, BEST_ALPHA_FILE]):
         print("Loading recommender from cache...")
         svd_model = joblib.load(CF_MODEL_FILE)
         # tfidf = joblib.load(TFIDF_FILE)
-        content_sim = np.load(SIM_MATRIX_FILE)
+        # content_sim = np.load(SIM_MATRIX_FILE, allow_pickle=True)
+        content_sim = load_npz(SIM_MATRIX_FILE)
         with open(A2IDX_FILE, "rb") as f:
             anime_index = pickle.load(f)
-        with open(IDX2A_FILE, "rb") as f:
-            idx_to_anime_id = pickle.load(f)
-        ratings, anime_meta, trainset, testset = load()
+        # with open(IDX2A_FILE, "rb") as f:
+        #     idx_to_anime_id = pickle.load(f)
+        with open(BEST_ALPHA_FILE, "r") as f:
+            best_alpha = float(f.read().strip())
+        ratings, anime_meta, trainset, valset, testset = load()
+        cb_scores = precompute_cb_scores(testset, anime_index, content_sim)
     else:
-        ratings, anime_meta, trainset, testset = load()
+        ratings, anime_meta, trainset, valset, testset = load()
 
         svd_model = trainSVD(trainset=trainset, testset=testset)
 
         content_sim, anime_index, idx_to_animeID = trainContentBased(anime_meta)
-
+        cb_scores = precompute_cb_scores(testset, anime_index, content_sim)
+        best_alpha, best_val_rmse = find_best_alpha(valset, svd_model, trainset, content_sim, anime_index)
+        print(f"Best alpha: {best_alpha}, Val RMSE: {best_val_rmse:.4f}")
+        
         # save
         joblib.dump(svd_model, CF_MODEL_FILE)
         #
-        np.save(SIM_MATRIX_FILE, content_sim)
+        # np.save(SIM_MATRIX_FILE, content_sim)
+        # beacuse sparse
+        save_npz(SIM_MATRIX_FILE, content_sim)
+        print("saved sim_matrix file")
+        exit()
         with open(A2IDX_FILE, "wb") as f:
             pickle.dump(anime_index, f)
         with open(IDX2A_FILE, "wb") as f:
             pickle.dump(idx_to_animeID, f)
+        with open(BEST_ALPHA_FILE, "w") as f:
+            f.write(str(best_alpha))
 
     userID = random.choice(ratings['userID'].unique())
-    recommendations = hybrid_recommend(userID, ratings, anime_meta, svd_model, content_sim, anime_index, idx_to_animeID, top_n=10)
+    recommendations = hybrid_recommend(userID, ratings, anime_meta, svd_model, content_sim, anime_index, cb_scores, top_n=10, alpha=best_alpha)
 
     # Map to anime titles
     print(f"Top 10 recommendations for user {userID}:")
