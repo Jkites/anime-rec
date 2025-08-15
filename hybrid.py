@@ -12,6 +12,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import random
 from collections import defaultdict
 from scipy.sparse import save_npz, load_npz
+import matplotlib.pyplot as plt
 
 RATING_CSV = "data/ratings.csv"
 ANIME_CSV = "data/animes.csv"
@@ -108,12 +109,12 @@ def trainContentBased(anime_meta):
 #         if wid in anime_index:
 #             sims.append(content_sim[cand_idx, anime_index[wid]])
 #     return np.mean(sims) if sims else 0
-def cb_predict(userID, user_watched, content_sim, anime_index):
-    if userID not in anime_index:
+
+def cb_predict(animeID, user_watched, content_sim, anime_index):
+    if animeID not in anime_index:
         return None  # can't compute CB for this anime
     
-    cand_idx = anime_index[userID]
-    
+    cand_idx = anime_index[animeID]
     # filter only rated items that exist in similarity matrix
     rated_idxs = []
     ratings = []
@@ -188,7 +189,13 @@ def find_best_alpha(val_data, cf_model, trainset, content_sim, anime_index):
     cf_preds = np.array(cf_preds, dtype=np.float32)
     cb_preds = np.array(cb_preds, dtype=np.float32)
     y_true = np.array(y_true, dtype=np.float32)
-    
+
+    # plt.hist(cf_preds, bins=50, alpha=0.5, label='CF')
+    # plt.hist(cb_preds, bins=50, alpha=0.5, label='CB')
+    # plt.legend()
+    # plt.title("Distribution of CF vs CB Predictions")
+    # plt.show()
+
     for a in alphas:
         preds = a * cf_preds + (1 - a) * cb_preds
         rmse = np.sqrt(np.mean((y_true - preds) ** 2))
@@ -199,7 +206,7 @@ def find_best_alpha(val_data, cf_model, trainset, content_sim, anime_index):
     return best_alpha, best_rmse # 1.6441
 
 
-def hybrid_recommend(userID, ratings, anime_meta, cf_model, content_sim, anime_index, cb_scores, top_n=10, alpha=0.7): #removed indx_to_animeID param unused
+def hybrid_recommend(userID, ratings, anime_meta, cf_model, content_sim, anime_index, cb_scores, top_n=10, alpha=0.7): # removed indx_to_animeID param unused
     # blend CF and CB recommendations with alpha
     # get all anime IDs
     # all_animeIDs = anime_meta['animeID'].tolist()
