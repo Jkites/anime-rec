@@ -14,6 +14,15 @@ def home():
         recommendations = None
         return render_template('index.html', recs=recommendations)
     return render_template('index.html', recs=None)
+'''
+import gzip
+import shutil
 
+with gzip.open('features.xml.gz') as f:
+
+    features = pd.read_csv(f)
+https://docs.python.org/3/library/xml.etree.elementtree.html
+features.head()
+'''
 if __name__ == '__main__':
     app.run(debug=True)
