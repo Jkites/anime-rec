@@ -336,7 +336,7 @@ def hybrid_recommend(user_watched, userID, anime_meta, cf_model, content_sim, an
         cb_score = cb_scores.get(animeID)
         if animeID in cf_items_seen: # blend
             cf_score = cf_model.predict(userID, animeID).est # cf model does guess average if userID not in list
-            # final_scores[animeID] = alpha * cf_score + (1 - alpha) * (cb_score if cb_score is not None else cf_score)
+            final_scores[animeID] = alpha * cf_score + (1 - alpha) * (cb_score if cb_score is not None else cf_score)
             # final_scores[animeID] = cf_weight * cf_score + cb_weight * (cb_score if cb_score is not None else cf_score)
 
     ranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
@@ -382,8 +382,8 @@ def hybrid_recommend_popularity(anime_avg_rating, anime_count, user_watched, use
         popularity_factor = anime_count.get(animeID, 0) / max_count  # 0..1
         cb_score = 0.7 * (cb_score if cb_score is not None else 7.0) + 0.3 * pop_score * popularity_factor
         final_scores[animeID] = cb_score
-        if animeID in cf_items_seen: # blend
-            cf_score = cf_model.predict(userID, animeID).est # cf model does guess average if userID not in list (which they won't be)
+        # if animeID in cf_items_seen: # blend
+        #     cf_score = cf_model.predict(userID, animeID).est # cf model does guess average if userID not in list (which they won't be)
             # final_scores[animeID] = alpha * cf_score + (1 - alpha) * (cb_score if cb_score is not None else cf_score)
             # final_scores[animeID] = cf_weight * cf_score + cb_weight * (cb_score if cb_score is not None else cf_score)
 
