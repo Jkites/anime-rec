@@ -56,7 +56,7 @@ def load():
     
     return ratings, anime_meta, trainset, valset, testset
 
-# !!!TODO: crossvalidation hyperparameter search
+# !!!TODO: crossvalidation hyperparameter search / switch to lightFM / periodic retrain?
 # train SVD model
 def trainSVD(trainset, testset):
     print("training SVD model")
@@ -236,8 +236,8 @@ def find_best_alpha(val_data, cf_model, trainset, content_sim, anime_index):
     
     return best_alpha, best_rmse # 1.6441
 
-
-def hybrid_recommend(userID, ratings, trainset, anime_meta, cf_model, content_sim, anime_index, top_n=10, alpha=0.7): # removed indx_to_animeID param unused
+# evaluation method
+def hybrid_recommend_rmse(userID, ratings, trainset, anime_meta, cf_model, content_sim, anime_index, top_n=10, alpha=0.7): # removed indx_to_animeID param unused
     # blend CF and CB recommendations with alpha
     # get all anime IDs
     # all_animeIDs = anime_meta['animeID'].tolist()
@@ -299,6 +299,44 @@ def hybrid_recommend(userID, ratings, trainset, anime_meta, cf_model, content_si
     print(f"Hybrid RMSE: {hybrid_rmse_val:.4f}")
 
     return ranked[:top_n]
+# for  final usage for user
+def hybrid_recommend(user_watched, userID, anime_meta, cf_model, content_sim, anime_index, top_n=10, alpha=0.7):
+    # blend CF and CB recommendations with alpha
+    trainset = cf_model.trainset
+    cf_items_seen = {}
+    for uid in trainset.all_users():  # numeric inner IDs
+        raw_uid = trainset.to_raw_uid(uid)  # convert to original userID
+        user_ratings = []
+        for iid, rating in trainset.ur[uid]:  # ur maps inner user ID -> list of (item_inner_id, rating)
+            raw_iid = trainset.to_raw_iid(iid)
+            user_ratings.append((raw_iid, rating))
+        cf_items_seen[raw_uid] = user_ratings
+
+    cb_scores = {}
+    print("computing CB predictions...")
+    for animeID in anime_meta['animeID']:
+        if animeID in [aid for aid, _ in user_watched]:
+            continue
+        score = cb_predict(animeID, user_watched, content_sim, anime_index)
+        if score is not None:
+            cb_scores[animeID] = score
+
+    # normalize CB predictions to match CF rating range
+    cb_scores = normalize_cb_predictions(cb_scores)
+
+    final_scores = {}
+    print("scoring unseen anime")
+    for animeID in anime_meta['animeID']:
+        if animeID in user_watched:
+            continue
+        cb_score = cb_scores.get(animeID)
+        if animeID in cf_items_seen: # blend
+            cf_score = cf_model.predict(userID, animeID).est # cf model does guess average if userID not in list
+            final_scores[animeID] = alpha * cf_score + (1 - alpha) * (cb_score if cb_score is not None else cf_score)
+
+    ranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+
+    return ranked[:top_n] + ranked[-(top_n):]
     
 if __name__ == "__main__":
     if LOAD_ONLY and all(os.path.exists(f) for f in [CF_MODEL_FILE, SIM_MATRIX_FILE, A2IDX_FILE, IDX2A_FILE, BEST_ALPHA_FILE]):
@@ -332,7 +370,6 @@ if __name__ == "__main__":
         # beacuse sparse
         save_npz(SIM_MATRIX_FILE, content_sim)
         print("saved sim_matrix file")
-        exit()
         with open(A2IDX_FILE, "wb") as f:
             pickle.dump(anime_index, f)
         with open(IDX2A_FILE, "wb") as f:
@@ -341,7 +378,7 @@ if __name__ == "__main__":
             f.write(str(best_alpha))
 
     userID = random.choice(ratings['userID'].unique())
-    recommendations = hybrid_recommend(userID, ratings, trainset, anime_meta, svd_model, content_sim, anime_index, top_n=10, alpha=best_alpha)
+    recommendations = hybrid_recommend_rmse(userID, ratings, trainset, anime_meta, svd_model, content_sim, anime_index, top_n=10, alpha=best_alpha)
 
     # Map to anime titles
     print(f"Top 10 recommendations for user {userID}:")

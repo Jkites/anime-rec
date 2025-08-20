@@ -1,0 +1,39 @@
+
+<!-- Run npx @tailwindcss/cli -i ./src/input.css -o ./src/output.css --watch when modifying -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anime Recommender</title>
+  <!-- <script src="https://cdn.tailwindcss.com"></script> -->
+   <link href="../static/output.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
+  <div class="bg-white shadow-lg rounded-2xl p-6 w-full max-w-2xl">
+    <h1 class="text-2xl font-bold mb-4 text-center">Anime Recommender</h1>
+    
+    <!-- User Input -->
+    <form method="POST" class="flex gap-2 mb-6">
+      <input type="text" name="user_id" placeholder="Enter User ID"
+             class="flex-1 p-2 border rounded-lg focus:ring focus:ring-blue-300" required>
+      <button type="submit"
+              class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
+        Recommend
+      </button>
+    </form>
+    <!-- File Input -->
+    <form method="POST" class="flex gap-2 mb-6" enctype="multipart/form-data">
+      <input type="file" name="user_file" placeholder="Enter xml or xml.gz" accept=".xml,.gz"
+             class="block w-full text-black file:mr-4 file:rounded-full file:border- 0 
+             file:bg-blue-500 file:px-4 file:py-2 
+             file:text-sm file:font-semibold file:text-gray-200 hover:file:bg-blue-600" required>
+      <button type="submit"
+            class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
+        Recommend
+      </button>
+    </form>
+
+  </div>
+</body>
+</html>

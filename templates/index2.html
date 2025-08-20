@@ -1,18 +1,73 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <style type="text/tailwindcss">
-      @theme {
-        --color-clifford: #da373d;
-      }
-    </style>
-  </head>
-  <body>
-    <h1 class="text-3xl font-bold underline text-clifford">
-      Hello world!
-    </h1>
-  </body>
+
+<!-- Run npx @tailwindcss/cli -i ./src/input.css -o ./src/output.css --watch when modifying -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anime Recommender</title>
+  <!-- <script src="https://cdn.tailwindcss.com"></script> -->
+   <link href="../static/output.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-6">
+  <div class="bg-white shadow-lg rounded-2xl p-6 w-full max-w-2xl">
+    <h1 class="text-2xl font-bold mb-4 text-center">Anime Recommender</h1>
+    
+    <!-- User Input -->
+    <form method="POST" class="flex gap-2 mb-6">
+      <input type="text" name="user_id" placeholder="Enter User ID"
+             class="flex-1 p-2 border rounded-lg focus:ring focus:ring-blue-300" required>
+      <button type="submit"
+              class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
+        Recommend
+      </button>
+    </form>
+    <!-- File Input -->
+    <form method="POST" class="flex gap-2 mb-6" enctype="multipart/form-data">
+      <input type="file" name="user_file" placeholder="Enter xml or xml.gz" accept=".xml,.gz"
+             class="block w-full text-black file:mr-4 file:rounded-full file:border-0 
+             file:bg-blue-500 file:px-4 file:py-2 
+             file:text-sm file:font-semibold file:text-gray-200 hover:file:bg-blue-600" required>
+      <button type="submit"
+            class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">
+        Recommend
+      </button>
+    </form>
+
+    <!-- Recommendations -->
+    {% if recommendations %}
+      <h2 class="text-xl font-semibold mb-4">Top 10 Recommendations for {{user}}</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-2 gap-6">
+        {% for rec in recommendations[:10] %}
+        <a href="{{ rec.url }}" target="_blank" class="block">
+          <div class="bg-white shadow-md rounded-lg overflow-hidden hover:shadow-lg transition">
+            <img src="{{ rec.image_url }}" alt="{{ rec.title }}" class="w-full h-48 object-cover">
+            <div class="p-3">
+              <h3 class="font-semibold text-md truncate">{{ rec.title }}</h3>
+              <p class="text-gray-600 text-sm">Score: {{ rec.score }}</p>
+              <p class="text-gray-700 text-sm">Global Score: {{ rec.global_score }}</p>
+            </div>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+      <h2 class="text-xl font-semibold mb-4">Top 10 Trash Recommendations for {{user}}</h2>
+      <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-2 gap-6">
+      {% for rec in recommendations[10:] %}
+        <a href="{{ rec.url }}" target="_blank" class="block">
+          <div class="bg-white shadow-md rounded-lg overflow-hidden hover:shadow-lg transition">
+            <img src="{{ rec.image_url }}" alt="{{ rec.title }}" class="w-full h-48 object-cover">
+            <div class="p-3">
+              <h3 class="font-semibold text-md truncate">{{ rec.title }}</h3>
+              <p class="text-gray-600 text-sm">Score: {{ rec.score }}</p>
+              <p class="text-gray-700 text-sm">Global Score: {{ rec.global_score }}</p>
+            </div>
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+  </div>
+</body>
 </html>
