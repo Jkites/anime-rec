@@ -14,8 +14,8 @@ from collections import defaultdict
 from scipy.sparse import save_npz, load_npz
 import matplotlib.pyplot as plt
 
-RATING_CSV = "data/ratings.csv"
-ANIME_CSV = "data/animes.csv"
+RATING_CSV = "data/updated_ratings.csv"
+ANIME_CSV = "data/updated_animes.csv"
 DATA_DIR = "data/processed2"
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -30,7 +30,7 @@ BEST_ALPHA_FILE = os.path.join(DATA_DIR, "best_alpha.txt")
 LOAD_ONLY = True  # set True to skip retraining if cache exists
 
 # cap ratings for now
-MAX_RATINGS = 2_000_000
+MAX_RATINGS = 4_000_000
 
 def load():
     print("reading ratings csv...")
@@ -66,7 +66,7 @@ def trainSVD(trainset, testset):
     # Evaluate CF alone
     cf_preds = cf_model.test(testset)
     cf_rmse = accuracy.rmse(cf_preds, verbose=True)
-    print(f"SVD Test RMSE: {cf_rmse:.4f}") # 1.6828
+    print(f"SVD Test RMSE: {cf_rmse:.4f}") # 1.6828 1.6539
 
     return cf_model
 
@@ -301,7 +301,7 @@ def hybrid_recommend_rmse(userID, ratings, trainset, anime_meta, cf_model, conte
     return ranked[:top_n]
 # for  final usage for user
 def hybrid_recommend(user_watched, userID, anime_meta, cf_model, content_sim, anime_index, top_n=10, alpha=0.7):
-    # blend CF and CB recommendations with alpha
+    # blend CF and CB recommendations
     trainset = cf_model.trainset
     cf_items_seen = {}
     for uid in trainset.all_users():  # numeric inner IDs
@@ -325,6 +325,10 @@ def hybrid_recommend(user_watched, userID, anime_meta, cf_model, content_sim, an
     cb_scores = normalize_cb_predictions(cb_scores)
 
     final_scores = {}
+    # would work if userID was mapped correctly
+    # user_in_cf = hasattr(cf_model.trainset, 'to_inner_uid') and str(userID) in trainset._raw2inner_id_users
+    # cf_weight = 0.7 if user_in_cf and len(user_watched) >= 5 else 0.0
+    # cb_weight = 1 - cf_weight
     print("scoring unseen anime")
     for animeID in anime_meta['animeID']:
         if animeID in user_watched:
@@ -332,7 +336,56 @@ def hybrid_recommend(user_watched, userID, anime_meta, cf_model, content_sim, an
         cb_score = cb_scores.get(animeID)
         if animeID in cf_items_seen: # blend
             cf_score = cf_model.predict(userID, animeID).est # cf model does guess average if userID not in list
-            final_scores[animeID] = alpha * cf_score + (1 - alpha) * (cb_score if cb_score is not None else cf_score)
+            # final_scores[animeID] = alpha * cf_score + (1 - alpha) * (cb_score if cb_score is not None else cf_score)
+            # final_scores[animeID] = cf_weight * cf_score + cb_weight * (cb_score if cb_score is not None else cf_score)
+
+    ranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+
+    return ranked[:top_n] + ranked[-(top_n):]
+
+def hybrid_recommend_popularity(anime_avg_rating, anime_count, user_watched, userID, anime_meta, cf_model, content_sim, anime_index, top_n=10, alpha=0.7):
+    # blend CF and CB recommendations
+    trainset = cf_model.trainset
+    cf_items_seen = {}
+    for uid in trainset.all_users():  # numeric inner IDs
+        raw_uid = trainset.to_raw_uid(uid)  # convert to original userID
+        user_ratings = []
+        for iid, rating in trainset.ur[uid]:  # ur maps inner user ID -> list of (item_inner_id, rating)
+            raw_iid = trainset.to_raw_iid(iid)
+            user_ratings.append((raw_iid, rating))
+        cf_items_seen[raw_uid] = user_ratings
+
+    cb_scores = {}
+    print("computing CB predictions...")
+    for animeID in anime_meta['animeID']:
+        if animeID in [aid for aid, _ in user_watched]:
+            continue
+        score = cb_predict(animeID, user_watched, content_sim, anime_index)
+        if score is not None:
+            cb_scores[animeID] = score
+
+    # normalize CB predictions to match CF rating range
+    cb_scores = normalize_cb_predictions(cb_scores)
+
+    final_scores = {}
+    max_count = max(anime_count.values()) if anime_count else 1
+    # would work if userID was mapped correctly
+    # user_in_cf = hasattr(cf_model.trainset, 'to_inner_uid') and str(userID) in trainset._raw2inner_id_users
+    # cf_weight = 0.7 if user_in_cf and len(user_watched) >= 5 else 0.0
+    # cb_weight = 1 - cf_weight
+    print("scoring unseen anime")
+    for animeID in anime_meta['animeID']:
+        if animeID in user_watched:
+            continue
+        cb_score = cb_scores.get(animeID)
+        pop_score = anime_avg_rating.get(animeID, 7.0)  # fallback rating
+        popularity_factor = anime_count.get(animeID, 0) / max_count  # 0..1
+        cb_score = 0.7 * (cb_score if cb_score is not None else 7.0) + 0.3 * pop_score * popularity_factor
+        final_scores[animeID] = cb_score
+        if animeID in cf_items_seen: # blend
+            cf_score = cf_model.predict(userID, animeID).est # cf model does guess average if userID not in list (which they won't be)
+            # final_scores[animeID] = alpha * cf_score + (1 - alpha) * (cb_score if cb_score is not None else cf_score)
+            # final_scores[animeID] = cf_weight * cf_score + cb_weight * (cb_score if cb_score is not None else cf_score)
 
     ranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
 
@@ -366,7 +419,6 @@ if __name__ == "__main__":
         # save
         joblib.dump(svd_model, CF_MODEL_FILE)
         #
-        # np.save(SIM_MATRIX_FILE, content_sim)
         # beacuse sparse
         save_npz(SIM_MATRIX_FILE, content_sim)
         print("saved sim_matrix file")
@@ -374,6 +426,7 @@ if __name__ == "__main__":
             pickle.dump(anime_index, f)
         with open(IDX2A_FILE, "wb") as f:
             pickle.dump(idx_to_animeID, f)
+        # exit()
         with open(BEST_ALPHA_FILE, "w") as f:
             f.write(str(best_alpha))
 
