@@ -9,25 +9,6 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'data/uploaded'
 
-# @app.route('/', methods=['GET', 'POST'])
-# def home():
-#     if request.method == 'POST':
-#         file = request.files['file']
-#         new_user_df = pd.read_csv(file)
-#         # recommendations = recommend_for_user(new_user_df)
-#         recommendations = None
-#         return render_template('index.html', recs=recommendations)
-#     return render_template('index.html', recs=None)
-'''
-import gzip
-import shutil
-
-with gzip.open('features.xml.gz') as f:
-
-    features = pd.read_csv(f)
-https://docs.python.org/3/library/xml.etree.elementtree.html
-features.head()
-'''
 @app.route("/", methods=["GET", "POST"])
 def upload_file():
     if request.method == "POST":
