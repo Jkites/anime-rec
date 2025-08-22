@@ -265,11 +265,11 @@ def hybrid_recommend_rmse(userID, ratings, trainset, anime_meta, cf_model, conte
             raw_iid = trainset.to_raw_iid(iid)
             user_ratings.append((raw_iid, rating))
         cf_items_seen[raw_uid] = user_ratings
-
+    watched_ids = set(aid for aid, _ in user_watched)
     cb_scores = {}
     print("computing CB predictions...")
     for animeID in anime_meta['animeID']:
-        if animeID in [aid for aid, _ in user_watched]:
+        if animeID in watched_ids:
             continue
         score = cb_predict(animeID, user_watched, content_sim, anime_index)
         if score is not None:
@@ -281,7 +281,7 @@ def hybrid_recommend_rmse(userID, ratings, trainset, anime_meta, cf_model, conte
     final_scores = {}
     print("scoring unseen anime")
     for animeID in anime_meta['animeID']:
-        if animeID in user_watched:
+        if animeID in watched_ids:
             continue
         # cb_score = sim_scores.get(animeID, 0)
         # cb_score = cb_predict(animeID, user_watched, content_sim, anime_index)
@@ -311,11 +311,11 @@ def hybrid_recommend(user_watched, userID, anime_meta, cf_model, content_sim, an
             raw_iid = trainset.to_raw_iid(iid)
             user_ratings.append((raw_iid, rating))
         cf_items_seen[raw_uid] = user_ratings
-
+    watched_ids = set(aid for aid, _ in user_watched)
     cb_scores = {}
     print("computing CB predictions...")
     for animeID in anime_meta['animeID']:
-        if animeID in [aid for aid, _ in user_watched]:
+        if animeID in watched_ids:
             continue
         score = cb_predict(animeID, user_watched, content_sim, anime_index)
         if score is not None:
@@ -331,7 +331,7 @@ def hybrid_recommend(user_watched, userID, anime_meta, cf_model, content_sim, an
     # cb_weight = 1 - cf_weight
     print("scoring unseen anime")
     for animeID in anime_meta['animeID']:
-        if animeID in user_watched:
+        if animeID in watched_ids:
             continue
         cb_score = cb_scores.get(animeID)
         if animeID in cf_items_seen: # blend
@@ -354,11 +354,11 @@ def hybrid_recommend_popularity(anime_avg_rating, anime_count, user_watched, use
             raw_iid = trainset.to_raw_iid(iid)
             user_ratings.append((raw_iid, rating))
         cf_items_seen[raw_uid] = user_ratings
-
+    watched_ids = set(aid for aid, _ in user_watched)
     cb_scores = {}
     print("computing CB predictions...")
     for animeID in anime_meta['animeID']:
-        if animeID in [aid for aid, _ in user_watched]:
+        if animeID in watched_ids:
             continue
         score = cb_predict(animeID, user_watched, content_sim, anime_index)
         if score is not None:
@@ -375,7 +375,7 @@ def hybrid_recommend_popularity(anime_avg_rating, anime_count, user_watched, use
     # cb_weight = 1 - cf_weight
     print("scoring unseen anime")
     for animeID in anime_meta['animeID']:
-        if animeID in user_watched:
+        if animeID in watched_ids:
             continue
         cb_score = cb_scores.get(animeID)
         pop_score = anime_avg_rating.get(animeID, 7.0)  # fallback rating

@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'data/uploaded'
+# app.config['UPLOAD_FOLDER'] = 'data/uploaded'
 
 @app.route("/", methods=["GET", "POST"])
 def upload_file():
